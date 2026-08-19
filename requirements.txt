@@ -16,3 +16,8 @@ reportlab
 streamlit
 pandas
 openpyxl
+openpyxl
+streamlit
+pandas
+openpyxl
+xlrd
