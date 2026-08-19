@@ -7,7 +7,7 @@ import streamlit as st
 
 # 1. SAYFA YAPILANDIRMASI
 st.set_page_config(
-    page_title="Görükle Acente - Kurye Performans",
+    page_title="Operatör - Kargo Teslimat Takibi",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -61,7 +61,7 @@ custom_css = """
         background: linear-gradient(135deg, #48CAE4 0%, #00B4D8 100%) !important;
     }
     
-    /* "AT Zimmet Raporu Yükle" Alanı Sarı Tasarım */
+    /* "TESLİM Dosyası Yükle" Alanı Sarı Tasarım */
     [data-testid="stFileUploader"] section {
         background: linear-gradient(135deg, #FFD166 0%, #FFB703) !important;
         border: 2px dashed #FB8500 !important;
@@ -115,20 +115,6 @@ custom_css = """
     .metric-value {
         font-size: 19px;
         font-weight: 700;
-    }
-    .channel-badge {
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 6px;
-        padding: 4px 10px;
-        font-size: 12px;
-        display: inline-block;
-        margin-right: 8px;
-        margin-top: 8px;
-    }
-    .badge-val {
-        font-weight: 700;
-        color: #FFB703 !important;
     }
     
     /* Dashboard Kartları */
@@ -206,7 +192,7 @@ def norm_name(val):
 
 
 # ==========================================
-# OTOMATİK KURYE FOTOĞRAFI ALMA
+# OTOMATİK PERSONEL FOTOĞRAFI ALMA
 # ==========================================
 def get_courier_photo(courier_name):
     clean_courier = clean_string(courier_name)
@@ -294,116 +280,54 @@ def smart_read_file(uploaded_file):
     except Exception:
         pass
 
-    for enc in ["utf-8", "cp1254", "latin1"]:
-        try:
-            dfs = pd.read_html(io.BytesIO(file_bytes), encoding=enc)
-            if dfs and len(dfs) > 0:
-                return dfs[0]
-        except Exception:
-            continue
-
     raise Exception(
         "Dosya yapısı çözümlenemedi. Lütfen dosyanın bozuk olmadığını kontrol edin."
     )
 
 
 # ==========================================
-# AT ZİMMET İZLEME TAM UYUMLU İŞLEME MOTORU
+# TESLİM DOSYASI İŞLEME MOTORU (TESLİM SAYISI)
 # ==========================================
-def process_excel_data(df):
+def process_teslim_data(df):
     df.columns = df.columns.astype(str).str.strip()
-    req_cols = ["AT Zimmet Personel Adı", "Teslim Eden Personel"]
-    missing_cols = [col for col in req_cols if col not in df.columns]
+    
+    # Kullanıcının belirttiği sütun adı
+    target_col = "İşlem Yapan Personel"
+    if target_col not in df.columns:
+        return None, [target_col]
 
-    if missing_cols:
-        return None, missing_cols
-
+    # Boş olmayan satırları filtrele
     valid_df = df[
-        df["AT Zimmet Personel Adı"].notna()
-        & (df["AT Zimmet Personel Adı"].astype(str).str.strip() != "")
-        & (
-            df["AT Zimmet Personel Adı"].astype(str).str.strip().str.upper()
-            != "NAN"
-        )
-        & (
-            df["AT Zimmet Personel Adı"].astype(str).str.strip().str.upper()
-            != "NONE"
-        )
+        df[target_col].notna()
+        & (df[target_col].astype(str).str.strip() != "")
+        & (df[target_col].astype(str).str.strip().str.upper() != "NAN")
+        & (df[target_col].astype(str).str.strip().str.upper() != "NONE")
     ].copy()
 
-    valid_df["Norm_Zimmet"] = valid_df["AT Zimmet Personel Adı"].apply(norm_name)
-    valid_df["Norm_Teslim"] = valid_df["Teslim Eden Personel"].apply(norm_name)
+    valid_df["Norm_Personel"] = valid_df[target_col].apply(norm_name)
 
-    has_kanali = "Kargo Teslimat Kanalı" in valid_df.columns
-    has_aciklama = "Açıklama" in valid_df.columns
-
-    def evaluate_row(row):
-        z = row["Norm_Zimmet"]
-        t = row["Norm_Teslim"]
-
-        if t == "" or t != z:
-            return "DEVİR", ""
-
-        kanali = str(row["Kargo Teslimat Kanalı"]).strip().upper() if has_kanali else ""
-        aciklama = str(row["Açıklama"]).strip().upper() if has_aciklama else ""
-
-        if "İMZA" in kanali or "IMZA" in kanali:
-            return "TESLİM", "İMZA"
-        elif "SMS" in kanali:
-            return "TESLİM", "SMS"
-        elif "KAPIYA BIRAKILDI" in kanali or "KAPIYA" in kanali:
-            return "TESLİM", "KS"
-        elif (
-            kanali == "" or kanali == "NAN" or kanali == "-"
-        ) and "POS ENTEGRASYON" in aciklama:
-            return "TESLİM", "KS-PE"
-
-        return "TESLİM", "DİĞER"
-
-    results = valid_df.apply(evaluate_row, axis=1)
-    valid_df["Durum"] = [r[0] for r in results]
-    valid_df["Kanal"] = [r[1] for r in results]
-
-    personnel_groups = valid_df.groupby("Norm_Zimmet")
+    # Personel bazında satır sayılarını (TESLİM SAYISI) hesapla
+    personnel_groups = valid_df.groupby("Norm_Personel")
 
     summary = []
     for norm_p, p_df in personnel_groups:
         p_name = (
-            p_df["AT Zimmet Personel Adı"].mode()[0]
-            if not p_df["AT Zimmet Personel Adı"].mode().empty
+            p_df[target_col].mode()[0]
+            if not p_df[target_col].mode().empty
             else norm_p
         )
         p_name = " ".join(str(p_name).split())
 
-        zimmet_cnt = len(p_df)
-        devir_df = p_df[p_df["Durum"] == "DEVİR"]
-        teslim_edilemeyen_cnt = len(devir_df)
-        teslim_df = p_df[p_df["Durum"] == "TESLİM"]
-        teslim_cnt = len(teslim_df)
-
-        success_rate = (
-            round((teslim_cnt / zimmet_cnt) * 100, 1) if zimmet_cnt > 0 else 0.0
-        )
-
-        imza_cnt = len(teslim_df[teslim_df["Kanal"] == "İMZA"])
-        sms_cnt = len(teslim_df[teslim_df["Kanal"] == "SMS"])
-        ks_cnt = len(teslim_df[teslim_df["Kanal"] == "KS"])
-        ks_pe_cnt = len(teslim_df[teslim_df["Kanal"] == "KS-PE"])
+        teslim_cnt = len(p_df)
 
         summary.append({
             "Personel": p_name,
-            "Zimmet": zimmet_cnt,
-            "Teslim Edilen": teslim_cnt,
-            "Teslim Edilemeyen": teslim_edilemeyen_cnt,
-            "Başarı Oranı": success_rate,
-            "İMZA": imza_cnt,
-            "SMS": sms_cnt,
-            "KS": ks_cnt,
-            "KS-PE": ks_pe_cnt,
+            "TESLİM SAYISI": teslim_cnt,
         })
 
     res_df = pd.DataFrame(summary)
     if not res_df.empty:
+        res_df = res_df.sort_values(by="TESLİM SAYISI", ascending=False)
         res_df.index = range(1, len(res_df) + 1)
 
     return res_df, None
@@ -416,8 +340,7 @@ with st.sidebar:
     st.markdown(
         """
     <div class="notranslate" style="text-align: center; padding-bottom: 10px;">
-        <h2 style="margin: 0; color: #FFFFFF;">Yurtiçi Kargo</h2>
-        <h4 style="margin: 0; color: #00B4D8;">Görükle Acente KOYS</h4>
+        <h2 style="margin: 0; color: #FFFFFF;">Operatör</h2>
     </div>
     """,
         unsafe_allow_html=True,
@@ -440,7 +363,7 @@ with st.sidebar:
     )
 
     uploaded_file = st.file_uploader(
-        "📂 AT Zimmet Raporu Yükle", type=["csv", "xlsx", "xls", "html"]
+        "📂 TESLİM Dosyası Yükle", type=["xlsx", "xls", "csv"]
     )
 
     st.markdown(
@@ -450,8 +373,8 @@ with st.sidebar:
 
     if st.button("📊 Ana Panel"):
         st.session_state.active_tab = "Ana Panel"
-    if st.button("🏃‍♂️ Kurye Performans"):
-        st.session_state.active_tab = "Kurye Performans"
+    if st.button("👥 Personel"):
+        st.session_state.active_tab = "Personel"
 
 # ==========================================
 # AKILLI VERİ YÖNETİMİ
@@ -461,9 +384,9 @@ if uploaded_file is not None:
         raw_df = smart_read_file(uploaded_file)
         st.session_state.raw_df = raw_df
 
-        perf_res, err = process_excel_data(raw_df)
+        perf_res, err = process_teslim_data(raw_df)
         if err:
-            st.error(f"❌ Eksik Sütunlar: {err}")
+            st.error(f"❌ Eksik Sütun: '{err[0]}' sütunu bulunamadı.")
         else:
             st.session_state.perf_df = perf_res
     except Exception as e:
@@ -473,59 +396,46 @@ if uploaded_file is not None:
 # TAB 1: ANA PANEL
 # ==========================================
 if st.session_state.active_tab == "Ana Panel":
-    st.title("📊 Görükle Acente - Genel Performans Özeti")
+    st.title("📊 Operatör - Genel Performans Özeti")
 
     perf_df = st.session_state.perf_df
     if perf_df is not None and not perf_df.empty:
-        total_zimmet = perf_df["Zimmet"].sum()
-        total_teslim = perf_df["Teslim Edilen"].sum()
-        total_devir = perf_df["Teslim Edilemeyen"].sum()
-        avg_rate = (
-            round((total_teslim / total_zimmet) * 100, 1) if total_zimmet > 0 else 0
-        )
+        total_teslim = perf_df["TESLİM SAYISI"].sum()
+        toplam_personel = len(perf_df)
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("📦 Toplam Zimmet", f"{total_zimmet:,}")
-        c2.metric("✅ Teslim Edilen", f"{total_teslim:,}")
-        c3.metric("🚨 Devir / Teslim Edilemeyen", f"{total_devir:,}")
-        c4.metric("🎯 Genel Başarı Oranı", f"%{avg_rate}")
+        c1, c2 = st.columns(2)
+        c1.metric("📦 Toplam Teslim Sayısı", f"{total_teslim:,}")
+        c2.metric("👥 Aktif Personel Sayısı", f"{toplam_personel:,}")
 
         st.markdown("---")
 
         # ----------------------------------------------------
-        # 1. KART: Kurye Başarı Oranları (Fotoğraf ve Değerler Daha Büyük)
+        # KART: Personel Dağılım Oranları
         # ----------------------------------------------------
         st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
         st.markdown(
-            "<h3 style='color: #FFB703 !important; margin-bottom: 20px;'>📊 Kurye Başarı Oranları (%)</h3>",
+            "<h3 style='color: #FFB703 !important; margin-bottom: 20px;'>📊 Personel Bazlı Teslim Sayısı Dağılımı</h3>",
             unsafe_allow_html=True,
         )
 
         c_sol, c_sag = st.columns([1, 2])
         with c_sol:
-            max_p = (
-                perf_df.loc[perf_df["Başarı Oranı"].idxmax()]
-                if not perf_df.empty
-                else None
-            )
+            max_p = perf_df.iloc[0] if not perf_df.empty else None
             max_name = max_p["Personel"] if max_p is not None else "-"
-            max_val = max_p["Başarı Oranı"] if max_p is not None else 0
-            
+            max_val = max_p["TESLİM SAYISI"] if max_p is not None else 0
             max_avatar_url = get_courier_photo(max_name) if max_p is not None else ""
 
             st.markdown(
                 f"""
                 <div style="padding: 5px 0;" class="notranslate">
-                    <div class="stat-label">En Başarılı Kurye</div>
+                    <div class="stat-label">En Çok İşlem Yapan Personel</div>
                     <div style="display: flex; align-items: center; gap: 20px; margin-top: 12px; margin-bottom: 18px;">
                         <img src="{max_avatar_url}" style="width: 110px; height: 110px; border-radius: 50%; border: 4px solid #FFB703; object-fit: cover; background-color: #1E3E62;">
                         <div>
-                            <div style="font-size: 24px; font-weight: bold; color: #FFFFFF; line-height: 1.3;">{max_name}</div>
-                            <div style="font-size: 38px; font-weight: 800; color: #FFB703; margin-top: 6px;">%{max_val}</div>
+                            <div style="font-size: 22px; font-weight: bold; color: #FFFFFF; line-height: 1.3;">{max_name}</div>
+                            <div style="font-size: 32px; font-weight: 800; color: #FFB703; margin-top: 6px;">{max_val} Adet</div>
                         </div>
                     </div>
-                    <div class="stat-label" style="margin-top: 15px;">Toplam Aktif Kurye</div>
-                    <div style="font-size: 18px; font-weight: 700; color: #00B4D8; margin-top: 2px;">{len(perf_df)} Kişi</div>
                 </div>
             """,
                 unsafe_allow_html=True,
@@ -535,97 +445,20 @@ if st.session_state.active_tab == "Ana Panel":
             bars_html = ""
             for _, r in perf_df.iterrows():
                 p_adi = r["Personel"]
-                p_oran = r["Başarı Oranı"]
+                p_adet = r["TESLİM SAYISI"]
+                yuzde = round((p_adet / total_teslim) * 100, 1) if total_teslim > 0 else 0
                 bars_html += f"""
                     <div class="progress-container notranslate">
                         <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600;">
                             <span>{p_adi}</span>
-                            <span style="color: #FFB703;">%{p_oran}</span>
+                            <span style="color: #FFB703;">{p_adet} Adet (%{yuzde})</span>
                         </div>
                         <div class="progress-bar-bg">
-                            <div class="progress-bar-fill-orange" style="width: {min(p_oran, 100)}%;"></div>
+                            <div class="progress-bar-fill-orange" style="width: {min(yuzde * 2, 100)}%;"></div>
                         </div>
                     </div>
                     """
             st.markdown(bars_html, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # ----------------------------------------------------
-        # 2. KART: Teslimat Kanalları Dağılımı
-        # ----------------------------------------------------
-        st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
-        st.markdown(
-            "<h3 style='color: #FFB703 !important; margin-bottom: 20px;'>📲 Teslimat Kanalları Dağılımı</h3>",
-            unsafe_allow_html=True,
-        )
-
-        chan_sol, chan_sag = st.columns([1, 2])
-        imza_t = perf_df["İMZA"].sum()
-        sms_t = perf_df["SMS"].sum()
-        ks_t = perf_df["KS"].sum()
-        kspe_t = perf_df["KS-PE"].sum()
-        toplam_kanal = imza_t + sms_t + ks_t + kspe_t
-
-        imza_oran = (
-            round((imza_t / toplam_kanal) * 100, 1) if toplam_kanal > 0 else 0
-        )
-        sms_oran = (
-            round((sms_t / toplam_kanal) * 100, 1) if toplam_kanal > 0 else 0
-        )
-        ks_oran = round((ks_t / toplam_kanal) * 100, 1) if toplam_kanal > 0 else 0
-        kspe_oran = (
-            round((kspe_t / toplam_kanal) * 100, 1) if toplam_kanal > 0 else 0
-        )
-
-        p1 = imza_oran
-        p2 = p1 + sms_oran
-        p3 = p2 + ks_oran
-
-        with chan_sol:
-            st.markdown(
-                '<div class="stat-label">En Çok Tercih Edilen</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div style="font-size: 18px; font-weight: bold; color: #FF6B6B; margin-bottom: 2px;">İMZA</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f'<div style="font-size: 13px; color: rgba(255,255,255,0.7); margin-bottom: 12px;">Yüzde: %{imza_oran}</div>',
-                unsafe_allow_html=True,
-            )
-
-            st.metric(label="TOPLAM İŞLEM ADEDİ", value=f"{toplam_kanal:,} Adet")
-
-        with chan_sag:
-            donut_html = f"""
-            <div style="display: flex; align-items: center; justify-content: center; gap: 30px; flex-wrap: wrap;">
-                <div style="position: relative; width: 150px; height: 150px;">
-                    <svg width="150" height="150" viewBox="0 0 42 42" style="transform: rotate(-90deg);">
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="rgba(255,255,255,0.1)" stroke-width="5"></circle>
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#FF6B6B" stroke-width="5" 
-                                    stroke-dasharray="{p1} {100 - p1}" stroke-dashoffset="0"></circle>
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#4EA8DE" stroke-width="5" 
-                                    stroke-dasharray="{sms_oran} {100 - sms_oran}" stroke-dashoffset="-{p1}"></circle>
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#FFB703" stroke-width="5" 
-                                    stroke-dasharray="{ks_oran} {100 - ks_oran}" stroke-dashoffset="-{p2}"></circle>
-                        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#4CAF50" stroke-width="5" 
-                                    stroke-dasharray="{kspe_oran} {100 - kspe_oran}" stroke-dashoffset="-{p3}"></circle>
-                    </svg>
-                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
-                        <span style="font-size: 12px; color: rgba(255,255,255,0.5); display: block;">Kanal</span>
-                        <strong style="font-size: 14px; color: #FFFFFF;">Dağılımı</strong>
-                    </div>
-                </div>
-                <div style="flex-grow: 1; min-width: 180px;">
-                    <div style="margin-bottom: 6px; font-size: 13px;"><span style="display:inline-block; width:10px; height:10px; background:#FF6B6B; border-radius:50%; margin-right:6px;"></span> <b>İMZA:</b> %{imza_oran} ({imza_t})</div>
-                    <div style="margin-bottom: 6px; font-size: 13px;"><span style="display:inline-block; width:10px; height:10px; background:#4EA8DE; border-radius:50%; margin-right:6px;"></span> <b>SMS:</b> %{sms_oran} ({sms_t})</div>
-                    <div style="margin-bottom: 6px; font-size: 13px;"><span style="display:inline-block; width:10px; height:10px; background:#FFB703; border-radius:50%; margin-right:6px;"></span> <b>KS:</b> %{ks_oran} ({ks_t})</div>
-                    <div style="font-size: 13px;"><span style="display:inline-block; width:10px; height:10px; background:#4CAF50; border-radius:50%; margin-right:6px;"></span> <b>KS-PE:</b> %{kspe_oran} ({kspe_t})</div>
-                </div>
-            </div>
-            """
-            st.markdown(donut_html, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.subheader("📋 Genel Performans Tablosu")
@@ -633,19 +466,19 @@ if st.session_state.active_tab == "Ana Panel":
 
     else:
         st.info(
-            "💡 Sol menüden **AT ZİMMET İZLEME** dosyanızı yükleyerek ana paneli görüntüleyebilirsiniz."
+            "💡 Sol menüden **TESLİM** dosyanızı yükleyerek ana paneli görüntüleyebilirsiniz."
         )
 
 # ==========================================
-# TAB 2: KURYE PERFORMANS PANELİ
+# TAB 2: PERSONEL PANELİ
 # ==========================================
-elif st.session_state.active_tab == "Kurye Performans":
-    st.title("🏃‍♂️ Kurye Performans Paneli")
+elif st.session_state.active_tab == "Personel":
+    st.title("👥 Personel Paneli")
 
     perf_df = st.session_state.perf_df
     if perf_df is not None and not perf_df.empty:
         st.success(
-            f"✅ AT ZİMMET İZLEME raporu aktif. Toplam **{len(perf_df)}** kurye bulundu."
+            f"✅ TESLİM raporu aktif. Toplam **{len(perf_df)}** personel bulundu."
         )
 
         all_personnel = ["Tümü"] + sorted(
@@ -662,15 +495,7 @@ elif st.session_state.active_tab == "Kurye Performans":
 
         for idx, row in filtered_perf_df.iterrows():
             p_name = row["Personel"]
-            zimmet = row["Zimmet"]
-            teslim = row["Teslim Edilen"]
-            devir = row["Teslim Edilemeyen"]
-            rate = row["Başarı Oranı"]
-            imza = row["İMZA"]
-            sms = row["SMS"]
-            ks = row["KS"]
-            ks_pe = row["KS-PE"]
-
+            teslim_sayisi = row["TESLİM SAYISI"]
             avatar_url = get_courier_photo(p_name)
 
             card_html = f"""
@@ -680,31 +505,13 @@ elif st.session_state.active_tab == "Kurye Performans":
                         <img src="{avatar_url}" class="avatar-circle">
                         <div>
                             <div class="person-name">{p_name}</div>
-                            <small style="color: #FFB703;">Saha Kuryesi</small>
+                            <small style="color: #FFB703;">Saha Personeli</small>
                         </div>
                     </div>
-                    <div style="text-align: center;">
-                        <div class="metric-title">Zimmet Sayısı</div>
-                        <div class="metric-value" style="color: #FFFFFF;">{zimmet}</div>
+                    <div style="text-align: center; margin-right: 20px;">
+                        <div class="metric-title">TESLİM SAYISI</div>
+                        <div class="metric-value" style="color: #4CAF50; font-size: 24px;">{teslim_sayisi} Adet</div>
                     </div>
-                    <div style="text-align: center;">
-                        <div class="metric-title">Teslim Edilen</div>
-                        <div class="metric-value" style="color: #4CAF50;">{teslim}</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div class="metric-title">Teslim Edilemeyen</div>
-                        <div class="metric-value" style="color: #F44336;">{devir}</div>
-                    </div>
-                    <div style="text-align: center; min-width: 80px;">
-                        <div class="metric-title">Başarı Oranı</div>
-                        <div class="metric-value" style="color: #FFB703;">%{rate}</div>
-                    </div>
-                </div>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06);">
-                    <div class="channel-badge">✍️ İMZA: <span class="badge-val">{imza}</span></div>
-                    <div class="channel-badge">📲 SMS: <span class="badge-val">{sms}</span></div>
-                    <div class="channel-badge">🚪 KS: <span class="badge-val">{ks}</span></div>
-                    <div class="channel-badge">💳 KS-PE: <span class="badge-val">{ks_pe}</span></div>
                 </div>
             </div>
             """
@@ -712,5 +519,5 @@ elif st.session_state.active_tab == "Kurye Performans":
 
     else:
         st.warning(
-            "⚠️ Kurye performans kartlarını görmek için sol menüden **AT ZİMMET İZLEME** dosyasını yükleyin."
+            "⚠️ Personel kartlarını görmek için sol menüden **TESLİM** dosyasını yükleyin."
         )
