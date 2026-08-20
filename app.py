@@ -195,7 +195,7 @@ def norm_name(val):
     
     cleaned = " ".join(val_str.upper().split())
     
-    # Hatice IŞIK ve Hatice Kübra IŞIK birleştirmesi
+    # Hatice IŞIK ve Hatice Kübra IŞIK ortak normalizasyonu
     if cleaned in ["HATICE ISIK", "HATICE KUBRA ISIK"]:
         return "HATICE KUBRA ISIK"
         
@@ -206,6 +206,10 @@ def norm_name(val):
 # OTOMATİK PERSONEL FOTOĞRAFI ALMA
 # ==========================================
 def get_courier_photo(courier_name):
+    # Hatice IŞIK ve Hatice Kübra IŞIK için ortak arama adı türetelim
+    if clean_string(courier_name) in ["HATICEISIK", "HATICEKUBRAISIK"]:
+        courier_name = "Hatice Kübra IŞIK"
+
     clean_courier = clean_string(courier_name)
     search_dirs = []
     if os.path.exists("kuryeler"):
@@ -317,7 +321,6 @@ def process_teslim_data(df):
 
     summary = []
     for norm_p, p_df in personnel_groups:
-        # Birleştirilen isimler için düzgün görünen formatı koruyalım
         if norm_p == "HATICE KUBRA ISIK":
             p_name = "Hatice Kübra IŞIK"
         else:
