@@ -192,7 +192,14 @@ def norm_name(val):
     val_str = str(val).strip()
     if val_str.upper() in ["NAN", "NONE", "-", ""]:
         return ""
-    return " ".join(val_str.upper().split())
+    
+    cleaned = " ".join(val_str.upper().split())
+    
+    # Hatice IŞIK ve Hatice Kübra IŞIK birleştirmesi
+    if cleaned in ["HATICE ISIK", "HATICE KUBRA ISIK"]:
+        return "HATICE KUBRA ISIK"
+        
+    return cleaned
 
 
 # ==========================================
@@ -310,12 +317,17 @@ def process_teslim_data(df):
 
     summary = []
     for norm_p, p_df in personnel_groups:
-        p_name = (
-            p_df[target_col].mode()[0]
-            if not p_df[target_col].mode().empty
-            else norm_p
-        )
-        p_name = " ".join(str(p_name).split())
+        # Birleştirilen isimler için düzgün görünen formatı koruyalım
+        if norm_p == "HATICE KUBRA ISIK":
+            p_name = "Hatice Kübra IŞIK"
+        else:
+            p_name = (
+                p_df[target_col].mode()[0]
+                if not p_df[target_col].mode().empty
+                else norm_p
+            )
+            p_name = " ".join(str(p_name).split())
+            
         teslim_cnt = len(p_df)
 
         summary.append({
@@ -352,12 +364,16 @@ def process_fatura_data(df):
 
     summary = []
     for norm_p, p_df in personnel_groups:
-        p_name = (
-            p_df[target_col].mode()[0]
-            if not p_df[target_col].mode().empty
-            else norm_p
-        )
-        p_name = " ".join(str(p_name).split())
+        if norm_p == "HATICE KUBRA ISIK":
+            p_name = "Hatice Kübra IŞIK"
+        else:
+            p_name = (
+                p_df[target_col].mode()[0]
+                if not p_df[target_col].mode().empty
+                else norm_p
+            )
+            p_name = " ".join(str(p_name).split())
+            
         fatura_cnt = len(p_df)
 
         summary.append({
