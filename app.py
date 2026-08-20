@@ -7,7 +7,7 @@ import streamlit as st
 
 # 1. SAYFA YAPILANDIRMASI
 st.set_page_config(
-    page_title="Operatör - Kargo Teslimat Takibi",
+    page_title="Operatör - Kargo & Fatura Takibi",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -18,8 +18,12 @@ if "active_tab" not in st.session_state:
     st.session_state.active_tab = "Ana Panel"
 if "perf_df" not in st.session_state:
     st.session_state.perf_df = None
+if "fatura_df" not in st.session_state:
+    st.session_state.fatura_df = None
 if "raw_df" not in st.session_state:
     st.session_state.raw_df = None
+if "raw_fatura_df" not in st.session_state:
+    st.session_state.raw_fatura_df = None
 
 KULLANICI_ISIM = "Celal ŞENOL"
 KULLANICI_GOREV = "Şube Şefi"
@@ -61,7 +65,7 @@ custom_css = """
         background: linear-gradient(135deg, #48CAE4 0%, #00B4D8 100%) !important;
     }
     
-    /* "TESLİM Dosyası Yükle" Alanı Sarı Tasarım */
+    /* Dosya Yükleme Alanı Tasarımı */
     [data-testid="stFileUploader"] section {
         background: linear-gradient(135deg, #FFD166 0%, #FFB703) !important;
         border: 2px dashed #FB8500 !important;
@@ -290,13 +294,10 @@ def smart_read_file(uploaded_file):
 # ==========================================
 def process_teslim_data(df):
     df.columns = df.columns.astype(str).str.strip()
-    
-    # Kullanıcının belirttiği sütun adı
     target_col = "İşlem Yapan Personel"
     if target_col not in df.columns:
         return None, [target_col]
 
-    # Boş olmayan satırları filtrele
     valid_df = df[
         df[target_col].notna()
         & (df[target_col].astype(str).str.strip() != "")
@@ -305,8 +306,6 @@ def process_teslim_data(df):
     ].copy()
 
     valid_df["Norm_Personel"] = valid_df[target_col].apply(norm_name)
-
-    # Personel bazında satır sayılarını (TESLİM SAYISI) hesapla
     personnel_groups = valid_df.groupby("Norm_Personel")
 
     summary = []
@@ -317,7 +316,6 @@ def process_teslim_data(df):
             else norm_p
         )
         p_name = " ".join(str(p_name).split())
-
         teslim_cnt = len(p_df)
 
         summary.append({
@@ -328,6 +326,48 @@ def process_teslim_data(df):
     res_df = pd.DataFrame(summary)
     if not res_df.empty:
         res_df = res_df.sort_values(by="TESLİM SAYISI", ascending=False)
+        res_df.index = range(1, len(res_df) + 1)
+
+    return res_df, None
+
+
+# ==========================================
+# FATURA DOSYASI İŞLEME MOTORU (FATURA KESİM SAYISI)
+# ==========================================
+def process_fatura_data(df):
+    df.columns = df.columns.astype(str).str.strip()
+    target_col = "Kesen Personel Adı"
+    if target_col not in df.columns:
+        return None, [target_col]
+
+    valid_df = df[
+        df[target_col].notna()
+        & (df[target_col].astype(str).str.strip() != "")
+        & (df[target_col].astype(str).str.strip().str.upper() != "NAN")
+        & (df[target_col].astype(str).str.strip().str.upper() != "NONE")
+    ].copy()
+
+    valid_df["Norm_Personel"] = valid_df[target_col].apply(norm_name)
+    personnel_groups = valid_df.groupby("Norm_Personel")
+
+    summary = []
+    for norm_p, p_df in personnel_groups:
+        p_name = (
+            p_df[target_col].mode()[0]
+            if not p_df[target_col].mode().empty
+            else norm_p
+        )
+        p_name = " ".join(str(p_name).split())
+        fatura_cnt = len(p_df)
+
+        summary.append({
+            "Personel": p_name,
+            "Fatura Kesim Sayısı": fatura_cnt,
+        })
+
+    res_df = pd.DataFrame(summary)
+    if not res_df.empty:
+        res_df = res_df.sort_values(by="Fatura Kesim Sayısı", ascending=False)
         res_df.index = range(1, len(res_df) + 1)
 
     return res_df, None
@@ -362,8 +402,11 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    uploaded_file = st.file_uploader(
-        "📂 TESLİM Dosyası Yükle", type=["xlsx", "xls", "csv"]
+    uploaded_teslim = st.file_uploader(
+        "📂 TESLİM Dosyası Yükle", type=["xlsx", "xls", "csv"], key="teslim_file"
+    )
+    uploaded_fatura = st.file_uploader(
+        "📂 FATURA Dosyası Yükle", type=["xlsx", "xls", "csv"], key="fatura_file"
     )
 
     st.markdown(
@@ -375,22 +418,35 @@ with st.sidebar:
         st.session_state.active_tab = "Ana Panel"
     if st.button("👥 Personel"):
         st.session_state.active_tab = "Personel"
+    if st.button("📄 Fatura"):
+        st.session_state.active_tab = "Fatura"
 
 # ==========================================
 # AKILLI VERİ YÖNETİMİ
 # ==========================================
-if uploaded_file is not None:
+if uploaded_teslim is not None:
     try:
-        raw_df = smart_read_file(uploaded_file)
+        raw_df = smart_read_file(uploaded_teslim)
         st.session_state.raw_df = raw_df
-
         perf_res, err = process_teslim_data(raw_df)
         if err:
-            st.error(f"❌ Eksik Sütun: '{err[0]}' sütunu bulunamadı.")
+            st.error(f"❌ Eksik Sütun (Teslim): '{err[0]}' sütunu bulunamadı.")
         else:
             st.session_state.perf_df = perf_res
     except Exception as e:
-        st.error(f"❌ Dosya Okuma/İşleme Hatası: {e}")
+        st.error(f"❌ Teslim Dosyası Okuma Hatası: {e}")
+
+if uploaded_fatura is not None:
+    try:
+        raw_fatura_df = smart_read_file(uploaded_fatura)
+        st.session_state.raw_fatura_df = raw_fatura_df
+        fatura_res, err = process_fatura_data(raw_fatura_df)
+        if err:
+            st.error(f"❌ Eksik Sütun (Fatura): '{err[0]}' sütunu bulunamadı.")
+        else:
+            st.session_state.fatura_df = fatura_res
+    except Exception as e:
+        st.error(f"❌ Fatura Dosyası Okuma Hatası: {e}")
 
 # ==========================================
 # TAB 1: ANA PANEL
@@ -399,19 +455,19 @@ if st.session_state.active_tab == "Ana Panel":
     st.title("📊 Operatör - Genel Performans Özeti")
 
     perf_df = st.session_state.perf_df
+    fatura_df = st.session_state.fatura_df
+
+    col1, col2 = st.columns(2)
+    with col1:
+        total_teslim = perf_df["TESLİM SAYISI"].sum() if perf_df is not None and not perf_df.empty else 0
+        st.metric("📦 Toplam Teslim Sayısı", f"{total_teslim:,}")
+    with col2:
+        total_fatura = fatura_df["Fatura Kesim Sayısı"].sum() if fatura_df is not None and not fatura_df.empty else 0
+        st.metric("📄 Toplam Fatura Kesim Sayısı", f"{total_fatura:,}")
+
+    st.markdown("---")
+
     if perf_df is not None and not perf_df.empty:
-        total_teslim = perf_df["TESLİM SAYISI"].sum()
-        toplam_personel = len(perf_df)
-
-        c1, c2 = st.columns(2)
-        c1.metric("📦 Toplam Teslim Sayısı", f"{total_teslim:,}")
-        c2.metric("👥 Aktif Personel Sayısı", f"{toplam_personel:,}")
-
-        st.markdown("---")
-
-        # ----------------------------------------------------
-        # KART: Personel Dağılım Oranları
-        # ----------------------------------------------------
         st.markdown('<div class="dashboard-card">', unsafe_allow_html=True)
         st.markdown(
             "<h3 style='color: #FFB703 !important; margin-bottom: 20px;'>📊 Personel Bazlı Teslim Sayısı Dağılımı</h3>",
@@ -428,7 +484,7 @@ if st.session_state.active_tab == "Ana Panel":
             st.markdown(
                 f"""
                 <div style="padding: 5px 0;" class="notranslate">
-                    <div class="stat-label">En Çok İşlem Yapan Personel</div>
+                    <div class="stat-label">En Çok Teslimat Yapan Personel</div>
                     <div style="display: flex; align-items: center; gap: 20px; margin-top: 12px; margin-bottom: 18px;">
                         <img src="{max_avatar_url}" style="width: 110px; height: 110px; border-radius: 50%; border: 4px solid #FFB703; object-fit: cover; background-color: #1E3E62;">
                         <div>
@@ -460,38 +516,23 @@ if st.session_state.active_tab == "Ana Panel":
                     """
             st.markdown(bars_html, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
-
-        st.subheader("📋 Genel Performans Tablosu")
-        st.dataframe(perf_df, use_container_width=True)
-
     else:
-        st.info(
-            "💡 Sol menüden **TESLİM** dosyanızı yükleyerek ana paneli görüntüleyebilirsiniz."
-        )
+        st.info("💡 Sol menüden **TESLİM** dosyanızı yükleyerek teslimat panellerini etkinleştirebilirsiniz.")
 
 # ==========================================
-# TAB 2: PERSONEL PANELİ
+# TAB 2: PERSONEL PANELİ (TESLİMAT)
 # ==========================================
 elif st.session_state.active_tab == "Personel":
-    st.title("👥 Personel Paneli")
+    st.title("👥 Personel Paneli (Teslimat)")
 
     perf_df = st.session_state.perf_df
     if perf_df is not None and not perf_df.empty:
-        st.success(
-            f"✅ TESLİM raporu aktif. Toplam **{len(perf_df)}** personel bulundu."
-        )
+        st.success(f"✅ TESLİM raporu aktif. Toplam **{len(perf_df)}** personel bulundu.")
 
-        all_personnel = ["Tümü"] + sorted(
-            perf_df["Personel"].dropna().unique().tolist()
-        )
-        selected_personnel = st.selectbox(
-            "🔍 Personel Seçerek Süzgeçle:", all_personnel
-        )
+        all_personnel = ["Tümü"] + sorted(perf_df["Personel"].dropna().unique().tolist())
+        selected_personnel = st.selectbox("🔍 Personel Seçerek Süzgeçle:", all_personnel)
 
-        if selected_personnel != "Tümü":
-            filtered_perf_df = perf_df[perf_df["Personel"] == selected_personnel]
-        else:
-            filtered_perf_df = perf_df
+        filtered_perf_df = perf_df if selected_personnel == "Tümü" else perf_df[perf_df["Personel"] == selected_personnel]
 
         for idx, row in filtered_perf_df.iterrows():
             p_name = row["Personel"]
@@ -517,7 +558,58 @@ elif st.session_state.active_tab == "Personel":
             """
             st.markdown(card_html, unsafe_allow_html=True)
 
+        st.subheader("📋 Teslimat Performans Tablosu")
+        st.dataframe(perf_df, use_container_width=True)
     else:
-        st.warning(
-            "⚠️ Personel kartlarını görmek için sol menüden **TESLİM** dosyasını yükleyin."
-        )
+        st.warning("⚠️ Personel teslimat kartlarını görmek için sol menüden **TESLİM** dosyasını yükleyin.")
+
+# ==========================================
+# TAB 3: FATURA PANELİ
+# ==========================================
+elif st.session_state.active_tab == "Fatura":
+    st.title("📄 Fatura Kesim Paneli")
+
+    fatura_df = st.session_state.fatura_df
+    if fatura_df is not None and not fatura_df.empty:
+        total_fatura = fatura_df["Fatura Kesim Sayısı"].sum()
+        toplam_personel_fatura = len(fatura_df)
+
+        c1, c2 = st.columns(2)
+        c1.metric("📄 Toplam Fatura Kesim Sayısı", f"{total_fatura:,}")
+        c2.metric("👥 Fatura Kesen Personel Sayısı", f"{toplam_personel_fatura:,}")
+
+        st.markdown("---")
+
+        all_personnel = ["Tümü"] + sorted(fatura_df["Personel"].dropna().unique().tolist())
+        selected_personnel = st.selectbox("🔍 Personel Seçerek Süzgeçle (Fatura):", all_personnel)
+
+        filtered_fatura_df = fatura_df if selected_personnel == "Tümü" else fatura_df[fatura_df["Personel"] == selected_personnel]
+
+        for idx, row in filtered_fatura_df.iterrows():
+            p_name = row["Personel"]
+            fatura_sayisi = row["Fatura Kesim Sayısı"]
+            avatar_url = get_courier_photo(p_name)
+
+            card_html = f"""
+            <div class="person-card notranslate">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+                    <div class="profile-section" style="min-width: 220px;">
+                        <img src="{avatar_url}" class="avatar-circle">
+                        <div>
+                            <div class="person-name">{p_name}</div>
+                            <small style="color: #FFB703;">Operasyon Personeli</small>
+                        </div>
+                    </div>
+                    <div style="text-align: center; margin-right: 20px;">
+                        <div class="metric-title">FATURA KESİM SAYISI</div>
+                        <div class="metric-value" style="color: #00B4D8; font-size: 24px;">{fatura_sayisi} Adet</div>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(card_html, unsafe_allow_html=True)
+
+        st.subheader("📋 Fatura Kesim Performans Tablosu")
+        st.dataframe(fatura_df, use_container_width=True)
+    else:
+        st.warning("⚠️ Fatura kartlarını ve analizini görmek için sol menüden **FATURA** dosyasını yükleyin.")
